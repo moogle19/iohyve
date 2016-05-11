@@ -16,6 +16,9 @@ __set() {
 			local sval="$(echo $val | cut -d '"' -f2)"
 			echo "Setting $name $prop=$val..."
 			zfs set "iohyve:$prop=$sval" $pool/iohyve/$name
+		elif [ ! -z "$(echo $prop | grep 'pcidev:')" ] && [ ! -z "$(echo $val | grep 'passthru')" ] && [ -z "$(acpidump -t | grep DMAR)" ]; then
+			echo "Your system does not support pci passthru"
+			exit 1
 		else
 			echo "Setting $name $prop=$val..."
 			zfs set iohyve:$prop=$val $pool/iohyve/$name
