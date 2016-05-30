@@ -5,12 +5,12 @@ __list() {
 	local flags="$1"
 	(
 	printf "%s^%s^%s^%s^%s\n" "Guest" "VMM?" "Running" "rcboot?" "Description"
-	local guests="$(zfs get -H -s local -o name,value iohyve:name | tr '\t' ',')"
+	local guests="$(__guests)"
 	for guest in $guests; do
 		local dataset="$(echo $guest | cut -f1 -d,)"
 		local name="$(echo $guest | cut -f2 -d,)"
-
 		local vmm="/dev/vmm/ioh-$name"
+
 		if [ -e $vmm ]; then
 			vmm="YES"
 		else
@@ -47,7 +47,7 @@ __info() {
 	local flags="$@"
 
 	# Poll to see what pools have active guests
-	local guests="$(zfs get -H -s local -o name,value iohyve:name | tr '\t' ',')"
+	local guests="$(__guests)"
 
 	( # Begining of very large table of output.
 	# Print common header
@@ -80,18 +80,18 @@ __info() {
 		local pool="$(echo $dataset | cut -f1 -d/)"
 
 		# Poll variables for common section
-		local cpu="$(zfs get -H -o value iohyve:cpu $dataset)"
-		local ram="$(zfs get -H -o value iohyve:ram $dataset)"
+		local cpu="$(__cpu $dataset)"
+		local ram="$(__ram $dataset)"
 
 		# Print common section (guest, size, cpu, raml)
 		printf "%s^-^%s^%s^%s" "$name" "$cpu" "$ram" "$pool"
 
 		# Get variable and print for verbose section (os, loader, tap, con)
 		if [ -n "$(echo "$flags" | grep 'v')" ]; then
-			local os="$(zfs get -H -o value iohyve:os $dataset)"
-			local loader="$(zfs get -H -o value iohyve:loader $dataset)"
-			local tap="$(zfs get -H -o value iohyve:tap $dataset)"
-			local con="$(zfs get -H -o value iohyve:con $dataset)"
+			local os="$(__os $dataset)"
+			local loader="$(__loader $dataset)"
+			local tap="$(__tap $dataset)"
+			local con="$(__con $dataset)"
 
 			printf "^%s^%s^%s^%s" "$os" "$loader" "$tap" "$con"
 		fi
@@ -175,31 +175,20 @@ __create() {
 		exit 1
 	fi
 
-	local guestlist="$(zfs get -H -o name -t filesystem -s local iohyve:name)"
-	listtaps(){
-		for i in $guestlist ; do
-			local tapprop="$(zfs get -H -o value iohyve:tap $i)"
-			printf $tapprop'\n'
-		done
-	}
-	local taplast="$(listtaps | sort -V | cut -c4- | tail -n1)"
+	local taplast="$(zfs get -H -o value -s local iohyve:tap | sort -V | cut -c4- | tail -n1)"
 	if [ -z $taplast ]; then
 		local tap='0'
 	else
 		local tap="$(expr $taplast + 1)"
 	fi
-	listcons(){
-		for i in $guestlist ; do
-			local conprop="$(zfs get -H -o value iohyve:con $i)"
-			printf $conprop'\n'
-		done
-	}
-	local conlast="$(listcons | sort -V | cut -c5- | tail -n1)"
+
+	local conlast="$(zfs get -H -o value -s local iohyve:con | sort -V | cut -c5- | tail -n1)"
 	if [ -z $conlast ]; then
 		local con='0'
 	else
 		local con="$(expr $conlast + 1)"
 	fi
+
 	echo "Creating $name..."
 	zfs create $pool/iohyve/$name
 	zfs create -V $size -o volmode=dev $pool/iohyve/$name/disk0
@@ -228,18 +217,17 @@ __install() {
 		exit 1
 	fi
 
-	local dataset="$(zfs get -H -s local -o name,value iohyve:name | grep "	$name$" | cut -f1)"
+	local dataset="$(__dataset $name)"
 	local mountpoint="$(zfs get -H -o value mountpoint $dataset)"
 	# Check if guest exists
 	if [ -d $mountpoint ]; then
 		# Check to make sure guest isn't running
 		local running=$(pgrep -fx "bhyve: ioh-$name")
 		if [ -z $running ]; then
-			local ram="$(zfs get -H -o value iohyve:ram $dataset)"
-			local con="$(zfs get -H -o value iohyve:con $dataset)"
-			local cpu="$(zfs get -H -o value iohyve:cpu $dataset)"
-			local bargexist="$(zfs get -H -o value iohyve:bargs $dataset)"
-			local bargs="$(echo $bargexist | sed -e 's/_/ /g')"
+			local ram="$(__ram $dataset)"
+			local con="$(__con $dataset)"
+			local cpu="$(__cpu $dataset)"
+			local bargs="$(__bargs $dataset)"
 			echo "Installing $name..."
 			# Set install prop
 			zfs set iohyve:install=yes $dataset
@@ -269,15 +257,14 @@ __load() {
 	fi
 
 	local disk="${3-$(zfs get -H -t volume -o name,value iohyve:name | grep "	$name$" | cut -f1)}"
-	local dataset="$(zfs get -H -o name,value -s local -t filesystem iohyve:name | grep "	$name$" | cut -f1)"
-	local ram="$(zfs get -H -o value iohyve:ram $dataset)"
-	local con="$(zfs get -H -o value iohyve:con $dataset)"
-	local loader="$(zfs get -H -o value iohyve:loader $dataset)"
-	local install="$(zfs get -H -o value iohyve:install $dataset)"
-	local os="$(zfs get -H -o value iohyve:os $dataset)"
-	local autogrub="$(zfs get -H -o value iohyve:autogrub $dataset)"
-	local bargexist="$(zfs get -H -o value iohyve:bargs $dataset)"
-	local bargs="$(echo $bargexist | sed -e 's/_/ /g')"
+	local dataset="$(__dataset $name)"
+	local ram="$(__ram $dataset)"
+	local con="$(__con $dataset)"
+	local loader="$(__loader $dataset)"
+	local install="$(__install $dataset)"
+	local os="$(__os $dataset)"
+	local autogrub="$(__autogrub $dataset)"
+	local bargs="$(__bargs $dataset)"
 	#Testing if -S is in the bargs settings. If then pass -S to bhyveload.
 	local test_for_wire_memory="-S"
 	case $bargs in
@@ -397,13 +384,12 @@ __boot() {
 	#   2 = always persist (start again even if guest is powering off)
 	local runmode="$2"
 	local pci="$3"
-	local dataset="$(zfs get -H -s local -o name,value iohyve:name | grep "	$name$" | cut -f1)"
-	local ram="$(zfs get -H -o value iohyve:ram $dataset)"
-	local con="$(zfs get -H -o value iohyve:con $dataset)"
-	local cpu="$(zfs get -H -o value iohyve:cpu $dataset)"
-	local persist="$(zfs get -H -o value iohyve:persist $dataset)"
-	local bargexist="$(zfs get -H -o value iohyve:bargs $dataset)"
-	local bargs="$(echo $bargexist | sed -e 's/_/ /g')"
+	local dataset="$(__dataset $name)"
+	local ram="$(__data $dataset)"
+	local con="$(_con $dataset)"
+	local cpu="$(__cpu $dataset)"
+	local persist="$(__persist $dataset)"
+	local bargs="$(__bargs $dataset)"
 	# Set install prop
 	zfs set iohyve:install=no $dataset
 	# Generate list of bhyve -s commands for all devices
@@ -442,7 +428,7 @@ __boot() {
 
 __prepare_guest() {
 	local name="$1"
-	local dataset="$(zfs get -H -s local -o name,value iohyve:name | grep "	$name$" | cut -f1)"
+	local dataset="$(__dataset $name)"
 	local pci="$(__get_zfs_pcidev_conf $dataset)"
 	# Setup tap if needed
 	local listtap="$(zfs get -H -o value iohyve:tap $dataset)"
@@ -482,13 +468,13 @@ __start() {
 	local flag="$3"
 	local pci=""
 	local runmode="1"
-	local dataset="$(zfs get -H -s local -o name,value iohyve:name | grep "	$name$" | cut -f1)"
-	local loader="$(zfs get -H -o value iohyve:loader $dataset)"
+	local dataset="$(__dataset $name)"
+	local loader="$(__loader $dataset)"
 	# Check if loader is UEFI
 	if [ $loader = "uefi" ]; then
 		__uefi "$name" "null.iso"
 	fi
-	local mountpoint="$(zfs get -H -o value mountpoint $dataset)"
+	local mountpoint="$(__mountpoint $dataset)"
 
 	# Check if guest exists
 	if [ -d $mountpoint ]; then
@@ -527,14 +513,14 @@ __uefi() {
 		exit 1
 	fi
 
-	local dataset="$(zfs get -H -s local -o name,value iohyve:name | grep "	$name$" | cut -f1)"
-	local ram="$(zfs get -H -o value iohyve:ram $dataset)"
-	local con="$(zfs get -H -o value iohyve:con $dataset)"
-	local cpu="$(zfs get -H -o value iohyve:cpu $dataset)"
-	local fw="$(zfs get -H -o value iohyve:fw $dataset)"
-	local tap="$(zfs get -H -o value iohyve:tap $dataset)"
-	local bargs="$(zfs get -H -o value iohyve:bargs $dataset | sed -e 's/_/ /g')"
-	local pool="$(zfs list -H -t volume -o name | grep iohyve/$name | cut -d '/' -f1)"
+	local dataset="$(__dataset $name)"
+	local ram="$(__ram $dataset)"
+	local con="$(__con $dataset)"
+	local cpu="$(__cpu $dataset)"
+	local fw="$(__fw $dataset)"
+	local tap="$(__tap $dataset)"
+	local bargs="$(__bargs $dataset)"
+	#local pool="$(zfs list -H -t volume -o name | grep iohyve/$name | cut -d '/' -f1)"
 	# Create tap if needed
 	# check to see if tap is already created before attempting to create new tap interface
 	local tapif="$(ifconfig -l | tr ' ' '\n' | grep -F -w $tap)"
@@ -640,7 +626,7 @@ __rename() {
 		printf "\trename <name> <newname>\n"
 		exit 1
 	fi
-	local dataset="$(zfs get -H -o name,value -s local -t filesystem iohyve:name | grep "	$name$" | cut -f1)"
+	local dataset="$(__dataset $name)"
 	local path="$(echo $dataset | rev | cut -f2- -d/ | rev)"
 	echo "Renaming $name to $newname..."
 	zfs rename -f $dataset $path/$newname

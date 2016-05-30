@@ -1,0 +1,78 @@
+#!/bin/sh
+
+# Get all guests
+__guests() {
+	echo "$(zfs get -H -s local -o name,value iohyve:name | tr '\t' ',')"
+}
+
+# Get dataset for guest
+__dataset() {
+	local name=$1
+	echo "$(zfs get -H -s local -o name,value iohyve:name | grep "	$name$" | cut -f1)"
+}
+
+# Get property of dataset
+__get_prop() {
+	local prop=$1
+	local dataset=$2
+	echo "$(zfs get -H -o value iohyve:$prop $dataset)"
+}
+
+# Get ram of guest
+__ram() {
+	__get_prop "ram" $1
+}
+
+# Get con of guest
+__con() {
+	__get_prop "con" $1
+}
+
+# Get CPU of guest
+__cpu() {
+	__get_prop "cpu" $1
+}
+
+# Get bargs of guest
+__bargs() {
+	echo "$(__get_prop "bargs" $1 | sed -e 's/_/ /g')"
+}
+
+# Get loader of guest
+__loader() {
+	__get_prop "loader" $1
+}
+
+# Get install of guest
+__install() {
+	__get_prop "install" $1
+}
+
+# Get OS of guest
+__os() {
+	__get_prop "os" $1
+}
+
+# Get autogrub of guest
+__autogrub() {
+	__get_prop "autogrub" $1
+}
+
+# Get persist value of guest
+__persist() {
+	__get_prop "persist" $1
+}
+
+# Get firmware of guest
+__fw() {
+	__get_prop "fw" $1
+}
+
+# Get tap of guest
+__tap() {
+	__get_prop "tap" $1
+}
+
+__mountpoint() {
+	echo "$(zfs get -H -o value mountpoint $1)"
+}

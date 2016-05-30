@@ -38,6 +38,7 @@ fi
 . "${LIB}/ioh-guest"
 . "${LIB}/ioh-disk"
 . "${LIB}/ioh-tap"
+. "${LIB}/ioh-common"
 
 # Show version
 __version() {
